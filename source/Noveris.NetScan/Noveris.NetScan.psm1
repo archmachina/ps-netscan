@@ -151,7 +151,7 @@ Function Test-NetIPv4RangeConnectivity
                 $runspace.AddParameter("NoPing", $NoPing) | Out-Null
                 $runspace.AddParameter("TcpPorts", $TcpPorts) | Out-Null
                 $runspace.RunspacePool = $pool
-    
+
                 $runspaces += [PSCustomObject]@{
                     Runspace = $runspace
                     Status = $runspace.BeginInvoke()
