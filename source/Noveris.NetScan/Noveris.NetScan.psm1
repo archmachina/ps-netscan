@@ -13,6 +13,7 @@ Set-StrictMode -Version 2
 #>
 Function New-NetScanRange
 {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory=$true)]
@@ -139,6 +140,7 @@ Function Get-NetScanRangeData
 #>
 Function Test-NetScanRangeConnectivity
 {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingEmptyCatchBlock', '')]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory=$true)]
@@ -248,7 +250,7 @@ Function Test-NetScanRangeConnectivity
                     $pingRequest = New-Object System.Net.NetworkInformation.Ping
                     $replies = @()
                     $total = 4
-    
+
                     # Send a series of echo requests to the target
                     for ($count = 0; $count -lt $total ; $count++) {
                         $replies += $pingRequest.Send($Target)
@@ -256,27 +258,27 @@ Function Test-NetScanRangeConnectivity
                             Start-Sleep 1
                         }
                     }
-    
+
                     # If we received any replies, change availability to true
                     if ($replies.Status -contains "Success")
                     {
                         $status["Available"] = $true
                     }
                 }
-    
+
                 if ($PSBoundParameters.Keys -contains "TcpPort")
                 {
                     $status["Check"] = "TCP"
                     $status["Port"] = $TcpPort
                     $status["Available"] = $false
-                    
+
                     # Check this tcp port on the remote host
                     $client = [System.Net.Sockets.TCPClient]::New()
                     try {
                         # We don't care about the result of the task, just whether the client
                         # became connected within the timeout period
                         $client.ConnectAsync($Target, $TcpPort) | Out-Null
-                        
+
                         for ($count = 0; $count -lt 5 ; $count++)
                         {
                             if ($client.Connected)
@@ -303,7 +305,7 @@ Function Test-NetScanRangeConnectivity
             }
 
             $result = [PSCustomObject]$status | ConvertTo-Json
-            Write-Host "Result: $result"
+            #Write-Host "Result: $result"
             $result
         }
 
@@ -365,7 +367,7 @@ Function Test-NetScanRangeConnectivity
                     $runspace.AddParameter("Target", $addr) | Out-Null
                     $runspace.AddParameter("Ping", $true) | Out-Null
                     $runspace.RunspacePool = $pool
-    
+
                     $runspaces.Add([PSCustomObject]@{
                         Runspace = $runspace
                         Status = $runspace.BeginInvoke()
@@ -380,7 +382,7 @@ Function Test-NetScanRangeConnectivity
                     $runspace.AddParameter("Target", $addr) | Out-Null
                     $runspace.AddParameter("TcpPort", $port) | Out-Null
                     $runspace.RunspacePool = $pool
-    
+
                     $runspaces.Add([PSCustomObject]@{
                         Runspace = $runspace
                         Status = $runspace.BeginInvoke()
@@ -422,6 +424,7 @@ Function Test-NetScanRangeConnectivity
 
 Function Wait-NetScanCompletedRunspaces
 {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '')]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory=$true)]
