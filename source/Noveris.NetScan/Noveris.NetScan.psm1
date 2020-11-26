@@ -202,17 +202,9 @@ Function Test-NetScanRangeConnectivity
                 $targetState.Ping = [string]$state.Available
             }
 
-            if ($state.Check -eq "TCP")
+            if ($state.Check -eq "TCP" -and $state.Available)
             {
-                if ($state.Available)
-                {
-                    if (![string]::IsNullOrEmpty($targetState.TcpPorts))
-                    {
-                        $targetState.TcpPorts += ","
-                    }
-
-                    $targetState.TcpPorts += [string]$state.Port
-                }
+                $targetState.TcpPorts.Add($state.Port)
             }
         }
 
@@ -248,21 +240,18 @@ Function Test-NetScanRangeConnectivity
                     $status["Check"] = "Ping"
                     $status["Available"] = $false
                     $pingRequest = New-Object System.Net.NetworkInformation.Ping
-                    $replies = @()
                     $total = 4
 
-                    # Send a series of echo requests to the target
+                    # Send a series of echo requests to the target. Stop on first success.
                     for ($count = 0; $count -lt $total ; $count++) {
-                        $replies += $pingRequest.Send($Target)
-                        if ($count -lt ($total-1)) {
-                            Start-Sleep 1
+                        $reply = $pingRequest.Send($Target)
+                        if ($reply.Status -eq "Success")
+                        {
+                            $status["Available"] = $true
+                            break
                         }
-                    }
 
-                    # If we received any replies, change availability to true
-                    if ($replies.Status -contains "Success")
-                    {
-                        $status["Available"] = $true
+                        Start-Sleep 1
                     }
                 }
 
@@ -320,7 +309,7 @@ Function Test-NetScanRangeConnectivity
 
             if ($LogProgress)
             {
-                Write-Information "Current Range: $rangeName"
+                Write-Information "Scheduling Range: $rangeName"
             }
 
             # Loop through each address in the range
@@ -339,11 +328,11 @@ Function Test-NetScanRangeConnectivity
 
                 $addr = [IPAddress]::New($bytes)
                 $addrStr = $addr.ToString()
-                Write-Verbose "Current Address: $addrStr"
+                Write-Verbose "Scheduling Address: $addrStr"
 
                 if ($LogProgress)
                 {
-                    Write-Information "Current Address: $addrStr"
+                    Write-Information "Scheduling Address: $addrStr"
                 }
 
                 # Add this address to the connection state now to preserve ordering
@@ -352,7 +341,7 @@ Function Test-NetScanRangeConnectivity
                     Name = $addrStr
                     Available = $false
                     Ping = "unknown"
-                    TcpPorts = ""
+                    TcpPorts = New-Object 'System.Collections.Generic.List[int]'
                 }
 
                 # Wait for runspace count to reach low water mark before proceeding
@@ -620,7 +609,7 @@ Function Invoke-NetScanService
             $ranges = $results | ForEach-Object { $_.Range } | Select-Object -Unique
             foreach ($range in $ranges)
             {
-                $outputFile = [System.IO.Path]::Combine($OutputPath, $range)
+                $outputFile = ([System.IO.Path]::Combine($OutputPath, $range) + ".csv")
                 $results | Where-Object { $_.Range -eq $range } | Export-CSV -NoTypeInformation -Path $outputFile
             }
         }
