@@ -288,7 +288,7 @@ Function Test-NetScanRangeConnectivity
                     } catch {
                     }
                 }
-    
+
             } catch {
                 $status["Error"] = $_.ToString()
             }
