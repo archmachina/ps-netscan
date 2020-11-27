@@ -11,87 +11,76 @@ Set-StrictMode -Version 2
 
 <#
 #>
-Function New-NetScanRange
+Function Convert-BigIntegerToIPAddress
 {
-    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory=$true)]
-        [ValidateNotNullOrEmpty()]
-        [string]$Name,
-
-        [Parameter(Mandatory=$true)]
-        [ValidateNotNullOrEmpty()]
-        [string]$RangeStart,
-
-        [Parameter(Mandatory=$true)]
-        [ValidateNotNullOrEmpty()]
-        [string]$RangeEnd,
-
-        [Parameter(Mandatory=$false)]
-        [bool]$Ping = $true,
-
-        [Parameter(Mandatory=$false)]
+        [Parameter(Mandatory=$true,ValueFromPipelineByPropertyName)]
         [ValidateNotNull()]
-        [int[]]$TcpPorts = [int[]]@(80, 443, 445, 22, 3389)
+        [SYstem.Numerics.BigInteger]$Address,
+
+        [Parameter(Mandatory=$true,ValueFromPipelineByPropertyName)]
+        [ValidateSet(4,16)]
+        [int]$Length
     )
 
     process
     {
-        $range = [PSCustomObject]@{
-            Name = $Name
-            RangeStart = $RangeStart
-            RangeEnd = $RangeEnd
-            Ping = $Ping
-            TcpPorts = $TcpPorts
+        # Create an empty array to hold the BigInteger
+        $target = [array]::CreateInstance([byte], $Length)
+
+        # Validate BigInteger is positive and can fit in relevant
+        # address family
+        $bytes = $Address.ToByteArray()
+        if ($bytes.Length -gt $Length)
+        {
+            Write-Error "BigInteger is too large to fit address family"
         }
 
-        Get-NetScanRangeData -Range $range | Out-Null
+        if ($Address.CompareTo([System.Numerics.BigInteger]::Zero) -lt 0)
+        {
+            Write-Error "BigInteger must be positive"
+        }
 
-        $range
+        # Copy BigInteger over array and reverse if we are little endian
+        [array]::Copy($bytes, $target, $bytes.Length)
+        if ([BitConverter]::IsLittleEndian)
+        {
+            [array]::Reverse($bytes)
+        }
+
+        # Create a new IPAddress based on the byte array and output
+        [IPAddress]::New($bytes)
     }
 }
 
 <#
 #>
-Function Get-NetScanRangeData
+Function Convert-IPAddressToBigInteger
 {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory=$true)]
-        [ValidateNotNull()]
-        [PSCustomObject]$Range
+        [Parameter(Mandatory=$true,ValueFromPipeline)]
+        [ValidateNotNullOrEmpty()]
+        [IPAddress]$IPAddress
     )
 
     process
     {
-        # Check for required properties on the Range object
-        @("Name", "RangeStart", "RangeEnd", "Ping", "TcpPorts") | ForEach-Object {
-            if (($Range | Get-Member).Name -notcontains $_)
-            {
-                Write-Error "Missing $_ property on Range object"
-            }
-        }
+        $bytes = $IPAddress.GetAddressBytes()
 
-        # Validate the start address
-        $RangeStart = $Range.RangeStart.ToString()
-        $beginParsed = [IPAddress]::Parse($RangeStart)
-        $beginBytes = $beginParsed.GetAddressBytes()
-
-        # Validate the end address
-        $RangeEnd = $Range.RangeEnd.ToString()
-        $endParsed = [IPAddress]::Parse($RangeEnd)
-        $endBytes = $endParsed.GetAddressBytes()
-
-        # Ensure both addresses are the same family type
-        if ($beginParsed.AddressFamily -ne $endParsed.AddressFamily)
+        # Convert byte ranges, if we're little endian
+        if ([BitConverter]::IsLittleEndian)
         {
-            Write-Error "Begin and end address are different address families"
+            [Array]::Reverse($bytes)
         }
 
-        # Determine address length and make sure it is a supported address type
+        # Create the BigInteger
+        $address = [System.Numerics.BigInteger]::New($bytes)
+
+        # Determine the address length
         $addressLength = 0
-        switch ($beginParsed.AddressFamily)
+        switch ($IPAddress.AddressFamily)
         {
             "InterNetworkV6" {
                 $addressLength = 16
@@ -106,53 +95,558 @@ Function Get-NetScanRangeData
             }
         }
 
-        # Convert byte ranges, if we're little endian
-        if ([BitConverter]::IsLittleEndian)
-        {
-            [Array]::Reverse($beginBytes)
-            [Array]::Reverse($endBytes)
-        }
-
-        # Convert to BigInteger, so we can work with them as integers
-        $beginAddress = [System.Numerics.BigInteger]::New($beginBytes)
-        $endAddress = [System.Numerics.BigInteger]::New($endBytes)
-        Write-Verbose "Begin Address (int): $beginAddress"
-        Write-Verbose "End Address (int): $endAddress"
-
-        # Make sure the begin address is less than or equal to the end address
-        if ($beginAddress.CompareTo($endAddress) -gt 0)
-        {
-            Write-Error "Begin address is greater than the end address"
-        }
-
         [PSCustomObject]@{
-            Name = [string]($Range.Name)
-            RangeStartInt = $beginAddress
-            RangeEndInt = $endAddress
-            AddressLength = $addressLength
-            Ping = [bool]$Range.Ping
-            TcpPorts = [int[]]($Range.TcpPorts)
+            Length = $addressLength
+            Address = $address
         }
     }
 }
 
 <#
 #>
-Function Test-NetScanRangeConnectivity
+Function New-NetScanCollection
+{
+    [CmdletBinding()]
+    param(
+    )
+
+    process
+    {
+        [PSCustomObject]@{
+            Processing = New-Object 'System.Collections.Generic.List[HashTable]'
+            IPv4Systems = @{}
+            IPv6Systems = @{}
+        }
+    }
+}
+
+<#
+#>
+Function Test-NetScanValidCollection
+{
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNull()]
+        [PSCustomObject]$Collection
+    )
+
+    process
+    {
+        if (($Collection | Get-Member).Name -notcontains "Processing" -or
+            $Collection.Processing.GetType() -ne ([System.Collections.Generic.List[HashTable]]))
+        {
+            Write-Error "Invalid or missing Processing parameter in collection"
+        }
+
+        if (($Collection | Get-Member).Name -notcontains "IPv4Systems" -or
+            $Collection.IPv4Systems.GetType() -ne ([HashTable]))
+        {
+            Write-Error "Invalid or missing IPv4Systems parameter in collection"
+        }
+
+        if (($Collection | Get-Member).Name -notcontains "IPv6Systems" -or
+            $Collection.IPv6Systems.GetType() -ne ([HashTable]))
+        {
+            Write-Error "Invalid or missing IPv6Systems parameter in collection"
+        }
+    }
+}
+
+<#
+#>
+Function Add-NetScanSystemEntry
+{
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNull()]
+        [PSCustomObject]$Collection,
+
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNull()]
+        [IPAddress]$IPAddress
+    )
+
+    process
+    {
+        # Verify the collection
+        Test-NetScanValidCollection -Collection $Collection
+
+        # Check that we have a supported address family
+        switch ($IPAddress.AddressFamily)
+        {
+            "InterNetworkV6" {
+                $systems = $Collection.IPv6Systems
+                break
+            }
+
+            "InterNetwork" {
+                $systems = $Collection.IPv4Systems
+                break
+            }
+
+            default { Write-Error "Unsupported address family type" }
+        }
+
+        # Generate a BigInteger from the address for indexing
+        $addressInt = Convert-IPAddressToBigInteger -IPAddress $IPAddress
+
+        # Add the entry, if it doesn't already exist
+        # Include the 'IPAddress' object in the entry
+        if (!$systems.ContainsKey($addressInt.Address))
+        {
+            $systems[$addressInt.Address] = @{
+                Address = $IPAddress
+            }
+        }
+
+        # Pass the HashTable on in the pipeline
+        $systems[$addressInt.Address]
+    }
+}
+
+<#
+#>
+Function Get-NetScanSystemEntry
+{
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNull()]
+        [PSCustomObject]$Collection,
+
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNull()]
+        [IPAddress]$IPAddress
+    )
+
+    process
+    {
+        # Verify the collection
+        Test-NetScanValidCollection -Collection $Collection
+
+        # Check that we have a supported address family
+        switch ($IPAddress.AddressFamily)
+        {
+            "InterNetworkV6" {
+                $systems = $Collection.IPv6Systems
+                break
+            }
+
+            "InterNetwork" {
+                $systems = $Collection.IPv4Systems
+                break
+            }
+
+            default { Write-Error "Unsupported address family type" }
+        }
+
+        # Generate a BigInteger from the address for indexing
+        $addressInt = Convert-IPAddressToBigInteger -IPAddress $IPAddress
+
+        # Pass the HashTable on in the pipeline
+        $systems[$addressInt.Address]
+    }
+}
+
+<#
+#>
+Function Update-NetScanSystemEntry
+{
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNull()]
+        [HashTable]$System,
+
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNull()]
+        [HashTable]$Properties,
+
+        [Parameter(Mandatory=$false)]
+        [ValidateNotNull()]
+        [string]$PropertyPrefix = ""
+    )
+
+    process
+    {
+        # Add any properties that are defined for this system
+        foreach ($key in $Properties.Keys)
+        {
+            $newKey = ("{0}{1}" -f $PropertyPrefix, $key)
+
+            # Filter out any reserved property names and add anything else
+            switch ($newKey)
+            {
+                "Address" { break }
+                "Error" { break }
+                default { $system[$newKey] = $Properties[$key] }
+            }
+        }
+    }
+}
+
+<#
+#>
+Function Add-NetScanRange
+{
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$false,ValueFromPipeline)]
+        [ValidateNotNull()]
+        [PSCustomObject]$Collection = (New-NetScanCollection),
+
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNull()]
+        [IPAddress]$RangeStart,
+
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNull()]
+        [IPAddress]$RangeEnd,
+
+        [Parameter(Mandatory=$false)]
+        [ValidateNotNull()]
+        [HashTable]$Properties = @{},
+
+        [Parameter(Mandatory=$false)]
+        [ValidateNotNull()]
+        [string]$PropertyPrefix = ""
+    )
+
+    process
+    {
+        # Verify the collection
+        Test-NetScanValidCollection -Collection $Collection
+
+        # Convert and verify the start and end addresses
+        $rangeStartInt = Convert-IPAddressToBigInteger -IPAddress $RangeStart
+        $rangeEndInt = Convert-IPAddressToBigInteger -IPAddress $RangeEnd
+
+        # Ensure both addresses are the same family type
+        if ($RangeStart.AddressFamily -ne $RangeEnd.AddressFamily)
+        {
+            Write-Error "Begin and end address are different address families"
+        }
+
+        # Make sure the begin address is less than or equal to the end address
+        if ($rangeStartInt.Address.CompareTo($rangeEndInt.Address) -gt 0)
+        {
+            Write-Error "Start address is greater than the end address"
+        }
+
+        # Iterate through the addresses using BigIntegers
+        $current = $rangeStartInt.Address
+        while ($current.CompareTo($rangeEndInt.Address) -le 0)
+        {
+            # Convert index/BigInteger to IPAddress
+            $ipAddress = Convert-BigIntegerToIPAddress -Address $current -Length $rangeStartInt.Length
+
+            # Add the IPAddress to the collection
+            Add-NetScanAddress -Collection $Collection -IPAddress $ipAddress -Properties $Properties -PropertyPrefix $PropertyPrefix | Out-Null
+
+            $current = [System.Numerics.BigInteger]::Add($current, 1)
+        }
+
+        # Pass collection on in pipeline
+        $Collection
+    }
+}
+
+<#
+#>
+Function Add-NetScanAddress
+{
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$false,ValueFromPipeline)]
+        [ValidateNotNull()]
+        [PSCustomObject]$Collection = (New-NetScanCollection),
+
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNull()]
+        [IPAddress]$IPAddress,
+
+        [Parameter(Mandatory=$false)]
+        [ValidateNotNull()]
+        [HashTable]$Properties = @{},
+
+        [Parameter(Mandatory=$false)]
+        [ValidateNotNull()]
+        [string]$PropertyPrefix = ""
+    )
+
+    process
+    {
+        $system = Add-NetScanSystemEntry -Collection $Collection -IPAddress $IPAddress 
+
+        # Update properties on the system
+        Update-NetScanSystemEntry -System $system -Properties $Properties -PropertyPrefix $PropertyPrefix
+
+        # Pass collection on in pipeline
+        $Collection
+    }
+}
+
+<#
+#>
+Function Add-NetScanPingCheck
+{
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$false,ValueFromPipeline)]
+        [ValidateNotNull()]
+        [PSCustomObject]$Collection = (New-NetScanCollection)
+    )
+
+    process
+    {
+        # Verify the collection
+        Test-NetScanValidCollection -Collection $Collection
+
+        # Add the ping check script to the processing list
+        $Collection.Processing.Add(@{
+            Name = "Ping"
+            Script = {
+                param(
+                    [Parameter(Mandatory=$true)]
+                    [ValidateNotNull()]
+                    [HashTable]$System
+                )
+
+                $ErrorActionPreference = "Stop"
+                Set-StrictMode -Version 2
+
+                $address = $System["Address"]
+
+                $status = @{
+                    Address = $address
+                    Ping = $false
+                    Error = ""
+                }
+
+                try {
+                    # Ping the remote host
+                    $pingRequest = New-Object System.Net.NetworkInformation.Ping
+                    $total = 4
+
+                    # Send a series of echo requests to the target. Stop on first success.
+                    for ($count = 0; $count -lt $total ; $count++) {
+                        $reply = $pingRequest.Send($Address)
+                        if ($reply.Status -eq "Success")
+                        {
+                            $status["Ping"] = $true
+                            break
+                        }
+
+                        Start-Sleep 1
+                    }
+                } catch {
+                    $status["Error"] = $_.ToString()
+                }
+
+                $status
+            }
+        })
+
+        # Pass the collection on in the pipeline
+        $Collection
+    }
+}
+
+<#
+#>
+Function Add-NetScanTcpCheck
+{
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$false,ValueFromPipeline)]
+        [ValidateNotNull()]
+        [PSCustomObject]$Collection = (New-NetScanCollection),
+
+        [Parameter(Mandatory=$false)]
+        [ValidateNotNull()]
+        [int[]]$Ports = @(80, 443, 445, 22, 3389)
+    )
+
+    process
+    {
+        # Verify the collection
+        Test-NetScanValidCollection -Collection $Collection
+
+        $Collection.Processing.Add(@{
+            Name = "Tcp"
+            Args = @{
+                Ports = $Ports
+            }
+            Script = {
+                param(
+                    [Parameter(Mandatory=$true)]
+                    [ValidateNotNull()]
+                    [HashTable]$System,
+
+                    [Parameter(Mandatory=$true)]
+                    [ValidateNotNull()]
+                    [int[]]$Ports
+                )
+    
+                $ErrorActionPreference = "Stop"
+                Set-StrictMode -Version 2
+    
+                $address = $System["Address"]
+    
+                $status = @{
+                    Address = $address
+                    TcpPorts = New-Object System.Collections.Generic.List[int]
+                    Error = ""
+                }
+    
+                foreach ($port in $Ports) {
+                    # Check this tcp port on the remote host
+                    $client = [System.Net.Sockets.TCPClient]::New()
+                    try {
+                        # We don't care about the result of the task, just whether the client
+                        # became connected within the timeout period
+                        $client.ConnectAsync($address, $port) | Out-Null
+    
+                        for ($count = 0; $count -lt 5 ; $count++)
+                        {
+                            if ($client.Connected)
+                            {
+                                $status["TcpPorts"].Add($port)
+                                break
+                            }
+    
+                            Start-Sleep -Seconds 1
+                        }
+                    } catch {
+                        # Ignore error here. Either way, it is unavailable.
+                        $status["Error"] = $_
+                    }
+    
+                    try {
+                        $client.Close()
+                        $client.Dispose()
+                    } catch {
+                        $status["Error"] = $_.ToString()
+                        break
+                    }
+                }
+    
+                $status
+            }
+        })
+
+        # Pass collection on in pipeline
+        $Collection
+    }
+}
+
+<#
+#>
+Function Add-NetScanReverseLookup
+{
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$false,ValueFromPipeline)]
+        [ValidateNotNull()]
+        [PSCustomObject]$Collection = (New-NetScanCollection)
+    )
+
+    process
+    {
+        # Verify the collection
+        Test-NetScanValidCollection -Collection $Collection
+
+        # Add processing script to processing list
+        $Collection.Processing.Add(@{
+            Name = "ReverseLookup"
+            Script = {
+                param(
+                    [Parameter(Mandatory=$true)]
+                    [ValidateNotNull()]
+                    [HashTable]$System
+                )
+    
+                $ErrorActionPreference = "Stop"
+                Set-StrictMode -Version 2
+    
+                $address = $System["Address"]
+    
+                $status = @{
+                    Address = $address
+                    ReverseHostname = ""
+                    Error = ""
+                }
+    
+                try {
+                    $resolve = [System.Net.Dns]::GetHostByAddress($address)
+                    if (![string]::IsNullOrEmpty($resolve.HostName))
+                    {
+                        $status["ReverseHostname"] = $resolve.HostName
+                    }
+                } catch {
+                }
+    
+                $status
+            }
+        })
+
+        # Pass collection on in pipeline
+        $Collection
+    }
+}
+
+<#
+#>
+Function Add-NetScanWindowsInfo
+{
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
+    [CmdletBinding()]
+    param(
+
+    )
+
+    process
+    {
+        
+    }
+}
+
+<#
+#>
+Function Select-NetScanAddresses
+{
+    [CmdletBinding()]
+    param(
+
+    )
+
+    process
+    {
+        
+    }
+}
+
+<#
+#>
+Function Update-NetScanConnectivityInfo
 {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingEmptyCatchBlock', '')]
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory=$true)]
-        [ValidateNotNullOrEmpty()]
-        [PSCustomObject[]]$Ranges,
+        [Parameter(Mandatory=$true,ValueFromPipeline)]
+        [ValidateNotNull()]
+        [PSCustomObject]$Collection,
 
         [Parameter(Mandatory=$false)]
         [ValidateNotNull()]
         [int]$ConcurrentChecks = 32,
-
-        [Parameter(Mandatory=$false)]
-        [switch]$ExcludeUnavailable = $false,
 
         [Parameter(Mandatory=$false)]
         [switch]$LogProgress = $false
@@ -160,15 +654,6 @@ Function Test-NetScanRangeConnectivity
 
     process
     {
-        # Convert ranges to range data and check validity
-        Write-Verbose "Converting and checking range data"
-        $RangeData = $Ranges | ForEach-Object {
-            Get-NetScanRangeData -Range $_
-        }
-
-        # Create storage for connectivity state
-        $connectionState = [Ordered]@{}
-
         # Create runspace environment
         Write-Verbose "Creating runspace pool"
         $pool = [RunSpaceFactory]::CreateRunspacePool(1, $ConcurrentChecks)
@@ -184,202 +669,59 @@ Function Test-NetScanRangeConnectivity
             Set-StrictMode -Version 2
 
             #Write-Host "Received Result: $result"
-            $state = $result | ConvertFrom-Json
-            $targetState = $connectionState[$state.Target]
             #Write-Host ("TargetState eq null: " + ($targetState -eq $null))
             #Write-Host $connectionState.Keys
             #Write-Host ("Connection State contains target: " + ($connectionState.Keys -contains $state.Target))
 
-            # If this port or icmp check returned available, overall, the system is available
-            if ($state.Available)
+            #$state = $result | ConvertFrom-Json
+            $state = $result
+            if ($state.ContainsKey("Error") -and ![string]::IsNullOrEmpty($state["Error"]))
             {
-                $targetState.Available = $true
+                Write-Warning ("Error during check: " + $state["Error"])
+                return
             }
 
-            # Update the ping attribute, if this was a ping check
-            if ($state.Check -eq "Ping")
-            {
-                $targetState.Ping = [string]$state.Available
-            }
+            # Get the system entry
+            $system = Get-NetScanSystemEntry -Collection $Collection -IPAddress $state["Address"]
 
-            if ($state.Check -eq "TCP" -and $state.Available)
-            {
-                $targetState.TcpPorts.Add($state.Port)
-            }
+            # Update properties on the system
+            Update-NetScanSystemEntry -System $system -Properties $state
         }
 
-        # Script for scanning target
-        $checkScript = {
-            param(
-                [Parameter(Mandatory=$true)]
-                [ValidateNotNull()]
-                [IPAddress]$Target,
-
-                [Parameter(Mandatory=$false)]
-                [bool]$Ping = $false,
-
-                [Parameter(Mandatory=$false)]
-                [int]$TcpPort
-            )
-
-            $ErrorActionPreference = "Stop"
-            Set-StrictMode -Version 2
-
-            $status = @{
-                Target = $Target.ToString()
-                Available = $false
-                Port = 0
-                Check = "unknown"
-                Error = ""
-            }
-
-            try {
-                if ($Ping)
-                {
-                    # Ping the remote host
-                    $status["Check"] = "Ping"
-                    $status["Available"] = $false
-                    $pingRequest = New-Object System.Net.NetworkInformation.Ping
-                    $total = 4
-
-                    # Send a series of echo requests to the target. Stop on first success.
-                    for ($count = 0; $count -lt $total ; $count++) {
-                        $reply = $pingRequest.Send($Target)
-                        if ($reply.Status -eq "Success")
-                        {
-                            $status["Available"] = $true
-                            break
-                        }
-
-                        Start-Sleep 1
-                    }
-                }
-
-                if ($PSBoundParameters.Keys -contains "TcpPort")
-                {
-                    $status["Check"] = "TCP"
-                    $status["Port"] = $TcpPort
-                    $status["Available"] = $false
-
-                    # Check this tcp port on the remote host
-                    $client = [System.Net.Sockets.TCPClient]::New()
-                    try {
-                        # We don't care about the result of the task, just whether the client
-                        # became connected within the timeout period
-                        $client.ConnectAsync($Target, $TcpPort) | Out-Null
-
-                        for ($count = 0; $count -lt 5 ; $count++)
-                        {
-                            if ($client.Connected)
-                            {
-                                $status["Available"] = $true
-                                break
-                            }
-
-                            Start-Sleep -Seconds 1
-                        }
-                    } catch {
-                        # Ignore error here. Either way, it is unavailable.
-                    }
-
-                    try {
-                        $client.Close()
-                        $client.Dispose()
-                    } catch {
-                    }
-                }
-
-            } catch {
-                $status["Error"] = $_.ToString()
-            }
-
-            $result = [PSCustomObject]$status | ConvertTo-Json
-            #Write-Host "Result: $result"
-            $result
-        }
-
-        # Loop through all of the ranges supplied
-        foreach ($range in $RangeData) {
-            $rangeName = $range.Name
-            $rangeStartInt = $range.RangeStartInt
-            $rangeEndInt = $range.RangeEndInt
-            $addressLength = $range.AddressLength
-            $ping = $range.Ping
-            $tcpPorts = $range.TcpPorts
-
-            if ($LogProgress)
+        foreach ($systemCollection in @($Collection.IPv4Systems, $Collection.IPv6Systems))
+        {
+            Write-Verbose "Beginning iteration of systems collection"
+            foreach ($key in $systemCollection.Keys)
             {
-                Write-Information "Scheduling Range: $rangeName"
-            }
-
-            # Loop through each address in the range
-            $currentAddress = $rangeStartInt
-            while ($currentAddress.CompareTo($rangeEndInt) -le 0)
-            {
-                # Construct a usable address
-                $target = [array]::CreateInstance([byte], $addressLength)
-                $bytes = $currentAddress.ToByteArray()
-                [array]::Copy($bytes, $target, $bytes.Length)
-
-                if ([BitConverter]::IsLittleEndian)
-                {
-                    [array]::Reverse($bytes)
-                }
-
-                $addr = [IPAddress]::New($bytes)
-                $addrStr = $addr.ToString()
-                Write-Verbose "Scheduling Address: $addrStr"
-
-                if ($LogProgress)
-                {
-                    Write-Information "Scheduling Address: $addrStr"
-                }
-
-                # Add this address to the connection state now to preserve ordering
-                $connectionState[$addrStr] = [PSCustomObject]@{
-                    Range = $rangeName
-                    Name = $addrStr
-                    Available = $false
-                    Ping = "unknown"
-                    TcpPorts = New-Object 'System.Collections.Generic.List[int]'
-                }
-
+                $system = $systemCollection[$key]
+                Write-Verbose ("Current system: " + $system["Address"])
+    
                 # Wait for runspace count to reach low water mark before proceeding
                 $runspaces = (Wait-NetScanCompletedRunspaces -Runspaces $runspaces -LowWatermark 300 -ProcessScript $processScript).Runspaces
-
-                # Schedule a ping check, if requested
-                if ($Ping)
+    
+                foreach ($entry in $Collection.Processing)
                 {
-                    Write-Verbose "Scheduling ping check"
+                    $script = $entry["Script"]
+                    $name = $entry["Name"]
+    
+                    Write-Verbose "Scheduling processing script: $name"
                     $runspace = [PowerShell]::Create()
-                    $runspace.AddScript($checkScript) | Out-Null
-                    $runspace.AddParameter("Target", $addr) | Out-Null
-                    $runspace.AddParameter("Ping", $true) | Out-Null
+                    $runspace.AddScript($script) | Out-Null
+                    $runspace.AddParameter("System", $system.Clone()) | Out-Null
+                    if ($entry.ContainsKey("Args"))
+                    {
+                        foreach ($argName in $entry["Args"].Keys)
+                        {
+                            $runspace.AddParameter($argName, $entry["Args"][$argName])
+                        }
+                    }
                     $runspace.RunspacePool = $pool
-
+        
                     $runspaces.Add([PSCustomObject]@{
                         Runspace = $runspace
                         Status = $runspace.BeginInvoke()
                     })
                 }
-
-                # Loop through all tcp ports to check and schedule check
-                foreach ($port in $TcpPorts) {
-                    Write-Verbose "Scheduling tcp check: $port"
-                    $runspace = [PowerShell]::Create()
-                    $runspace.AddScript($checkScript) | Out-Null
-                    $runspace.AddParameter("Target", $addr) | Out-Null
-                    $runspace.AddParameter("TcpPort", $port) | Out-Null
-                    $runspace.RunspacePool = $pool
-
-                    $runspaces.Add([PSCustomObject]@{
-                        Runspace = $runspace
-                        Status = $runspace.BeginInvoke()
-                    })
-                }
-
-                # Increment current address using BigInteger static method
-                $currentAddress = [System.Numerics.BigInteger]::Add($currentAddress, 1)
             }
         }
 
@@ -388,6 +730,7 @@ Function Test-NetScanRangeConnectivity
         {
             Write-Information "Waiting for remainder of runspaces to finish"
         }
+
         Write-Verbose "Waiting for remainder of runspaces to finish"
         $runspaces = (Wait-NetScanCompletedRunspaces -Runspaces $runspaces -LowWatermark 0 -ProcessScript $processScript).Runspaces
 
@@ -395,22 +738,13 @@ Function Test-NetScanRangeConnectivity
         $pool.Close()
         $pool.Dispose()
 
-        # Generate an array of the systems and state
-        $results = $connectionState.Keys | ForEach-Object {
-            $connectionState[$_]
-        }
-
-        # Exclude systems that are unavailable, if specified
-        if ($ExcludeUnavailable)
-        {
-            $results = $results | Where-Object {$_.Available -eq $true}
-        }
-
-        # Output results
-        $results
+        # Pass collection on in pipeline
+        $Collection
     }
 }
 
+<#
+#>
 Function Wait-NetScanCompletedRunspaces
 {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '')]
