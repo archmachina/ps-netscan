@@ -14,7 +14,7 @@ Set-StrictMode -Version 2
 Function Convert-BigIntegerToIPAddress
 {
     [CmdletBinding()]
-    [OutputType('SYstem.Net.IPAddress')]
+    [OutputType('System.Net.IPAddress')]
     param(
         [Parameter(Mandatory=$true,ValueFromPipelineByPropertyName)]
         [ValidateNotNull()]
@@ -176,7 +176,7 @@ Function Add-NetScanSystemEntry
         [ValidateNotNull()]
         [IPAddress]$IPAddress,
 
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$false)]
         [ValidateNotNull()]
         [HashTable]$Properties = @{},
 
@@ -352,7 +352,7 @@ Function Select-NetScanSystems
         [PSCustomObject]$Collection,
 
         [Parameter(Mandatory=$true,ParameterSetName="All")]
-        [switch]$All = $true,
+        [switch]$All,
 
         [Parameter(Mandatory=$true,ParameterSetName="Range")]
         [ValidateNotNull()]
