@@ -174,7 +174,15 @@ Function Add-NetScanSystemEntry
 
         [Parameter(Mandatory=$true)]
         [ValidateNotNull()]
-        [IPAddress]$IPAddress
+        [IPAddress]$IPAddress,
+
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNull()]
+        [HashTable]$Properties = @{},
+
+        [Parameter(Mandatory=$false)]
+        [ValidateNotNull()]
+        [string]$PropertyPrefix = ""
     )
 
     process
@@ -205,82 +213,13 @@ Function Add-NetScanSystemEntry
         # Include the 'IPAddress' object in the entry
         if (!$systems.ContainsKey($addressInt.Address))
         {
-            $systems[$addressInt.Address] = @{
+            $systems[$addressInt.Address] = [ordered]@{
                 Address = $IPAddress
             }
         }
 
-        # Pass the HashTable on in the pipeline
-        $systems[$addressInt.Address]
-    }
-}
+        $system = $systems[$addressInt.Address]
 
-<#
-#>
-Function Get-NetScanSystemEntry
-{
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory=$true)]
-        [ValidateNotNull()]
-        [PSCustomObject]$Collection,
-
-        [Parameter(Mandatory=$true)]
-        [ValidateNotNull()]
-        [IPAddress]$IPAddress
-    )
-
-    process
-    {
-        # Verify the collection
-        Test-NetScanValidCollection -Collection $Collection
-
-        # Check that we have a supported address family
-        switch ($IPAddress.AddressFamily)
-        {
-            "InterNetworkV6" {
-                $systems = $Collection.IPv6Systems
-                break
-            }
-
-            "InterNetwork" {
-                $systems = $Collection.IPv4Systems
-                break
-            }
-
-            default { Write-Error "Unsupported address family type" }
-        }
-
-        # Generate a BigInteger from the address for indexing
-        $addressInt = Convert-IPAddressToBigInteger -IPAddress $IPAddress
-
-        # Pass the HashTable on in the pipeline
-        $systems[$addressInt.Address]
-    }
-}
-
-<#
-#>
-Function Update-NetScanSystemEntry
-{
-    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory=$true)]
-        [ValidateNotNull()]
-        [HashTable]$System,
-
-        [Parameter(Mandatory=$true)]
-        [ValidateNotNull()]
-        [HashTable]$Properties,
-
-        [Parameter(Mandatory=$false)]
-        [ValidateNotNull()]
-        [string]$PropertyPrefix = ""
-    )
-
-    process
-    {
         # Add any properties that are defined for this system
         foreach ($key in $Properties.Keys)
         {
@@ -294,6 +233,9 @@ Function Update-NetScanSystemEntry
                 default { $system[$newKey] = $Properties[$key] }
             }
         }
+
+        # Pass the HashTable on in the pipeline
+        $system
     }
 }
 
@@ -514,10 +456,7 @@ Function Add-NetScanAddress
 
     process
     {
-        $system = Add-NetScanSystemEntry -Collection $Collection -IPAddress $IPAddress
-
-        # Update properties on the system
-        Update-NetScanSystemEntry -System $system -Properties $Properties -PropertyPrefix $PropertyPrefix
+        Add-NetScanSystemEntry -Collection $Collection -IPAddress $IPAddress -Properties $Properties -PropertyPrefix $PropertyPrefix | Out-Null
 
         # Pass collection on in pipeline
         $Collection
@@ -789,33 +728,28 @@ Function Update-NetScanConnectivityInfo
                 return
             }
 
-            # Get the system entry
-            $system = Get-NetScanSystemEntry -Collection $Collection -IPAddress $state["Address"]
-
-            # Update properties on the system
-            Update-NetScanSystemEntry -System $system -Properties $state
+            # Add/Update the system entry
+            Add-NetScanSystemEntry -Collection $Collection -IPAddress $state["Address"] -Properties $state | Out-Null
         }
 
-        foreach ($systemCollection in @($Collection.IPv4Systems, $Collection.IPv6Systems))
+        foreach ($entry in $Collection.Processing)
         {
-            Write-Verbose "Beginning iteration of systems collection"
-            foreach ($key in $systemCollection.Keys)
+            foreach ($systemCollection in @($Collection.IPv4Systems, $Collection.IPv6Systems))
             {
-                $system = $systemCollection[$key]
-                Write-Verbose ("Current system: " + $system["Address"])
-
-                # Wait for runspace count to reach low water mark before proceeding
-                $runspaces = (Wait-NetScanCompletedRunspaces -Runspaces $runspaces -LowWatermark 300 -ProcessScript $processScript).Runspaces
-
-                foreach ($entry in $Collection.Processing)
+                foreach ($key in $systemCollection.Keys)
                 {
+                    # Wait for runspace count to reach low water mark before proceeding
+                    $runspaces = (Wait-NetScanCompletedRunspaces -Runspaces $runspaces -LowWatermark 300 -ProcessScript $processScript).Runspaces
+
+                    $system = $systemCollection[$key]
+
                     $script = $entry["Script"]
                     $name = $entry["Name"]
 
-                    Write-Verbose "Scheduling processing script: $name"
+                    Write-Verbose ("Scheduling processing script ({0}) for ({1})" -f $name, $system["Address"])
                     $runspace = [PowerShell]::Create()
                     $runspace.AddScript($script) | Out-Null
-                    $runspace.AddParameter("System", $system.Clone()) | Out-Null
+                    $runspace.AddParameter("System", ([HashTable]$system).Clone()) | Out-Null
                     if ($entry.ContainsKey("Args"))
                     {
                         foreach ($argName in $entry["Args"].Keys)
@@ -859,7 +793,7 @@ Function Update-NetScanConnectivityInfo
             $_.Values | ForEach-Object {
                 foreach ($prop in $properties)
                 {
-                    if (!$_.ContainsKey($prop))
+                    if ($_.Keys -notcontains $prop)
                     {
                         $_[$prop] = $null
                         $memberAdditions++
