@@ -14,10 +14,11 @@ Set-StrictMode -Version 2
 Function Convert-BigIntegerToIPAddress
 {
     [CmdletBinding()]
+    [OutputType('SYstem.Net.IPAddress')]
     param(
         [Parameter(Mandatory=$true,ValueFromPipelineByPropertyName)]
         [ValidateNotNull()]
-        [SYstem.Numerics.BigInteger]$Address,
+        [System.Numerics.BigInteger]$Address,
 
         [Parameter(Mandatory=$true,ValueFromPipelineByPropertyName)]
         [ValidateSet(4,16)]
@@ -106,6 +107,7 @@ Function Convert-IPAddressToBigInteger
 #>
 Function New-NetScanCollection
 {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
     [CmdletBinding()]
     param(
     )
@@ -261,6 +263,7 @@ Function Get-NetScanSystemEntry
 #>
 Function Update-NetScanSystemEntry
 {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory=$true)]
@@ -302,7 +305,7 @@ Function Get-NetScanRanges
     param(
         [Parameter(Mandatory=$true,ValueFromPipeline)]
         [ValidateNotNull()]
-        [PSCustomObject]$Collection = (New-NetScanCollection)
+        [PSCustomObject]$Collection
     )
 
     process
@@ -398,6 +401,7 @@ Function Add-NetScanRange
 #>
 Function Select-NetScanSystems
 {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '')]
     [CmdletBinding(DefaultParameterSetName="All")]
     param(
         [Parameter(Mandatory=$true,ValueFromPipeline,ParameterSetName="All")]
@@ -406,7 +410,7 @@ Function Select-NetScanSystems
         [PSCustomObject]$Collection,
 
         [Parameter(Mandatory=$true,ParameterSetName="All")]
-        [switch]$All,
+        [switch]$All = $true,
 
         [Parameter(Mandatory=$true,ParameterSetName="Range")]
         [ValidateNotNull()]
@@ -510,7 +514,7 @@ Function Add-NetScanAddress
 
     process
     {
-        $system = Add-NetScanSystemEntry -Collection $Collection -IPAddress $IPAddress 
+        $system = Add-NetScanSystemEntry -Collection $Collection -IPAddress $IPAddress
 
         # Update properties on the system
         Update-NetScanSystemEntry -System $system -Properties $Properties -PropertyPrefix $PropertyPrefix
@@ -623,18 +627,18 @@ Function Add-NetScanTcpCheck
                     [ValidateNotNull()]
                     [int[]]$Ports
                 )
-    
+
                 $ErrorActionPreference = "Stop"
                 Set-StrictMode -Version 2
-    
+
                 $address = $System["Address"]
-    
+
                 $status = @{
                     Address = $address
                     TcpPorts = New-Object System.Collections.Generic.List[int]
                     Error = ""
                 }
-    
+
                 foreach ($port in $Ports) {
                     # Check this tcp port on the remote host
                     $client = [System.Net.Sockets.TCPClient]::New()
@@ -642,7 +646,7 @@ Function Add-NetScanTcpCheck
                         # We don't care about the result of the task, just whether the client
                         # became connected within the timeout period
                         $client.ConnectAsync($address, $port) | Out-Null
-    
+
                         for ($count = 0; $count -lt 5 ; $count++)
                         {
                             if ($client.Connected)
@@ -650,14 +654,14 @@ Function Add-NetScanTcpCheck
                                 $status["TcpPorts"].Add($port)
                                 break
                             }
-    
+
                             Start-Sleep -Seconds 1
                         }
                     } catch {
                         # Ignore error here. Either way, it is unavailable.
                         $status["Error"] = $_
                     }
-    
+
                     try {
                         $client.Close()
                         $client.Dispose()
@@ -666,7 +670,7 @@ Function Add-NetScanTcpCheck
                         break
                     }
                 }
-    
+
                 $status
             }
         })
@@ -681,6 +685,7 @@ Function Add-NetScanTcpCheck
 Function Add-NetScanReverseLookup
 {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingEmptyCatchBlock', '')]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory=$false,ValueFromPipeline)]
@@ -702,18 +707,18 @@ Function Add-NetScanReverseLookup
                     [ValidateNotNull()]
                     [HashTable]$System
                 )
-    
+
                 $ErrorActionPreference = "Stop"
                 Set-StrictMode -Version 2
-    
+
                 $address = $System["Address"]
-    
+
                 $status = @{
                     Address = $address
                     ReverseHostname = ""
                     Error = ""
                 }
-    
+
                 try {
                     $resolve = [System.Net.Dns]::GetHostByAddress($address)
                     if (![string]::IsNullOrEmpty($resolve.HostName))
@@ -722,7 +727,7 @@ Function Add-NetScanReverseLookup
                     }
                 } catch {
                 }
-    
+
                 $status
             }
         })
@@ -736,6 +741,7 @@ Function Add-NetScanReverseLookup
 #>
 Function Update-NetScanConnectivityInfo
 {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingEmptyCatchBlock', '')]
     [CmdletBinding()]
     param(
@@ -797,15 +803,15 @@ Function Update-NetScanConnectivityInfo
             {
                 $system = $systemCollection[$key]
                 Write-Verbose ("Current system: " + $system["Address"])
-    
+
                 # Wait for runspace count to reach low water mark before proceeding
                 $runspaces = (Wait-NetScanCompletedRunspaces -Runspaces $runspaces -LowWatermark 300 -ProcessScript $processScript).Runspaces
-    
+
                 foreach ($entry in $Collection.Processing)
                 {
                     $script = $entry["Script"]
                     $name = $entry["Name"]
-    
+
                     Write-Verbose "Scheduling processing script: $name"
                     $runspace = [PowerShell]::Create()
                     $runspace.AddScript($script) | Out-Null
@@ -818,7 +824,7 @@ Function Update-NetScanConnectivityInfo
                         }
                     }
                     $runspace.RunspacePool = $pool
-        
+
                     $runspaces.Add([PSCustomObject]@{
                         Runspace = $runspace
                         Status = $runspace.BeginInvoke()
