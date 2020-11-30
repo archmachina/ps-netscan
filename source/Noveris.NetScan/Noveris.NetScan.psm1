@@ -116,6 +116,7 @@ Function New-NetScanCollection
             Processing = New-Object 'System.Collections.Generic.List[HashTable]'
             IPv4Systems = @{}
             IPv6Systems = @{}
+            Ranges = @{}
         }
     }
 }
@@ -149,6 +150,12 @@ Function Test-NetScanValidCollection
             $Collection.IPv6Systems.GetType() -ne ([HashTable]))
         {
             Write-Error "Invalid or missing IPv6Systems parameter in collection"
+        }
+
+        if (($Collection | Get-Member).Name -notcontains "Ranges" -or
+            $Collection.Ranges.GetType() -ne ([HashTable]))
+        {
+            Write-Error "Invalid or missing Ranges parameter in collection"
         }
     }
 }
@@ -289,6 +296,25 @@ Function Update-NetScanSystemEntry
 
 <#
 #>
+Function Get-NetScanRanges
+{
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true,ValueFromPipeline)]
+        [ValidateNotNull()]
+        [PSCustomObject]$Collection = (New-NetScanCollection)
+    )
+
+    process
+    {
+        $Collection.Ranges.Keys | ForEach-Object {
+            $Collection.Ranges[$_]
+        }
+    }
+}
+
+<#
+#>
 Function Add-NetScanRange
 {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
@@ -297,6 +323,10 @@ Function Add-NetScanRange
         [Parameter(Mandatory=$false,ValueFromPipeline)]
         [ValidateNotNull()]
         [PSCustomObject]$Collection = (New-NetScanCollection),
+
+        [Parameter(Mandatory=$false)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Name,
 
         [Parameter(Mandatory=$true)]
         [ValidateNotNull()]
@@ -349,8 +379,108 @@ Function Add-NetScanRange
             $current = [System.Numerics.BigInteger]::Add($current, 1)
         }
 
+        # Add the range to the collection, if a name has been supplied
+        if ($PSBoundParameters.Keys -contains "Name")
+        {
+            $Collection.Ranges[$Name] = [PSCustomObject]@{
+                Name = $Name
+                RangeStart = $RangeStart
+                RangeEnd = $RangeEnd
+            }
+        }
+
         # Pass collection on in pipeline
         $Collection
+    }
+}
+
+<#
+#>
+Function Select-NetScanSystems
+{
+    [CmdletBinding(DefaultParameterSetName="All")]
+    param(
+        [Parameter(Mandatory=$true,ValueFromPipeline,ParameterSetName="All")]
+        [Parameter(Mandatory=$true,ValueFromPipeline,ParameterSetName="Range")]
+        [ValidateNotNull()]
+        [PSCustomObject]$Collection,
+
+        [Parameter(Mandatory=$true,ParameterSetName="All")]
+        [switch]$All,
+
+        [Parameter(Mandatory=$true,ParameterSetName="Range")]
+        [ValidateNotNull()]
+        [IPAddress]$RangeStart,
+
+        [Parameter(Mandatory=$true,ParameterSetName="Range")]
+        [ValidateNotNull()]
+        [IPAddress]$RangeEnd
+    )
+
+    process
+    {
+        # Verify the collection
+        Test-NetScanValidCollection -Collection $Collection
+
+        switch ($PSCmdlet.ParameterSetName)
+        {
+            "Range" {
+                # Convert and verify the start and end addresses
+                $rangeStartInt = Convert-IPAddressToBigInteger -IPAddress $RangeStart
+                $rangeEndInt = Convert-IPAddressToBigInteger -IPAddress $RangeEnd
+
+                # Ensure both addresses are the same family type
+                if ($RangeStart.AddressFamily -ne $RangeEnd.AddressFamily)
+                {
+                    Write-Error "Begin and end address are different address families"
+                }
+
+                # Make sure the begin address is less than or equal to the end address
+                if ($rangeStartInt.Address.CompareTo($rangeEndInt.Address) -gt 0)
+                {
+                    Write-Error "Start address is greater than the end address"
+                }
+
+                # Check that we have a supported address family
+                $systems = $null
+                switch ($RangeStart.AddressFamily)
+                {
+                    "InterNetworkV6" {
+                        $systems = $Collection.IPv6Systems
+                        break
+                    }
+
+                    "InterNetwork" {
+                        $systems = $Collection.IPv4Systems
+                        break
+                    }
+
+                    default { Write-Error "Unsupported address family type" }
+                }
+
+                # Iterate through the addresses using BigIntegers
+                $matchSystems = $systems.Keys |
+                    Where-Object { $_.CompareTo($rangeStartInt.Address) -ge 0 -and $_.CompareTo($rangeEndInt.Address) -le 0} |
+                    ForEach-Object {
+                        [PSCustomObject]($systems[$_])
+                    }
+
+                $matchSystems
+                break
+            }
+
+            "All" {
+                @($Collection.IPv4Systems, $Collection.IPv6Systems) | ForEach-Object {
+                    $_.Values | ForEach-Object {
+                        [PSCustomObject]$_
+                    }
+                }
+                break
+            }
+
+            default { Write-Error "Unknown ParameterSetName" }
+        }
+
     }
 }
 
@@ -604,37 +734,6 @@ Function Add-NetScanReverseLookup
 
 <#
 #>
-Function Add-NetScanWindowsInfo
-{
-    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
-    [CmdletBinding()]
-    param(
-
-    )
-
-    process
-    {
-        
-    }
-}
-
-<#
-#>
-Function Select-NetScanAddresses
-{
-    [CmdletBinding()]
-    param(
-
-    )
-
-    process
-    {
-        
-    }
-}
-
-<#
-#>
 Function Update-NetScanConnectivityInfo
 {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingEmptyCatchBlock', '')]
@@ -657,7 +756,10 @@ Function Update-NetScanConnectivityInfo
         # Create runspace environment
         Write-Verbose "Creating runspace pool"
         $pool = [RunSpaceFactory]::CreateRunspacePool(1, $ConcurrentChecks)
-        $pool.ApartmentState = "MTA"
+        if (($pool | Get-Member).Name -contains "ApartmentState")
+        {
+            $pool.ApartmentState = "MTA"
+        }
         $pool.Open()
         $runspaces = New-Object System.Collections.Generic.List[PSCustomObject]
 
@@ -677,7 +779,7 @@ Function Update-NetScanConnectivityInfo
             $state = $result
             if ($state.ContainsKey("Error") -and ![string]::IsNullOrEmpty($state["Error"]))
             {
-                Write-Warning ("Error during check: " + $state["Error"])
+                Write-Warning ("Error during check on address {0}: {1}" -f $state["Address"], $state["Error"])
                 return
             }
 
@@ -737,6 +839,30 @@ Function Update-NetScanConnectivityInfo
         # Close off the runspace pool
         $pool.Close()
         $pool.Dispose()
+
+        # Fill all properties across all objects
+        Write-Verbose "Determining properties across all objects"
+        $properties = $($Collection.IPv4Systems, $Collection.IPv6Systems) | ForEach-Object {
+            $_.Values | ForEach-Object { $_.Keys }
+        } | Select-Object -Unique
+
+        Write-Information "Properties: $properties"
+
+        $memberAdditions = 0
+        $($Collection.IPv4Systems, $Collection.IPv6Systems) | ForEach-Object {
+            $_.Values | ForEach-Object {
+                foreach ($prop in $properties)
+                {
+                    if (!$_.ContainsKey($prop))
+                    {
+                        $_[$prop] = $null
+                        $memberAdditions++
+                    }
+                }
+            }
+        }
+
+        Write-Verbose "Filled $memberAdditions properties across objects"
 
         # Pass collection on in pipeline
         $Collection
