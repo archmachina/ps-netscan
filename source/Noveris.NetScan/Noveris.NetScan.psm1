@@ -14,7 +14,7 @@ Set-StrictMode -Version 2
 Function Convert-BigIntegerToIPAddress
 {
     [CmdletBinding()]
-    [OutputType('System.Net.IPAddress')]
+    [OutputType([System.Net.IPAddress])]
     param(
         [Parameter(Mandatory=$true,ValueFromPipelineByPropertyName)]
         [ValidateNotNull()]
