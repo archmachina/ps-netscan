@@ -30,17 +30,11 @@ Function Convert-BigIntegerToIPAddress
         # Create an empty array to hold the BigInteger
         $target = [array]::CreateInstance([byte], $Length)
 
-        # Validate BigInteger is positive and can fit in relevant
-        # address family
+        # Validate can fit in relevant address family
         $bytes = $Address.ToByteArray()
         if ($bytes.Length -gt $Length)
         {
             Write-Error "BigInteger is too large to fit address family"
-        }
-
-        if ($Address.CompareTo([System.Numerics.BigInteger]::Zero) -lt 0)
-        {
-            Write-Error "BigInteger must be positive"
         }
 
         # Copy BigInteger over array and reverse if we are little endian
