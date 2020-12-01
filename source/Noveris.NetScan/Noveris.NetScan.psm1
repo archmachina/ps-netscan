@@ -265,7 +265,10 @@ Function Add-NetScanRange
 
         [Parameter(Mandatory=$false)]
         [ValidateNotNullOrEmpty()]
-        [string]$Name,
+        [string]$Name = "",
+
+        [Parameter(Mandatory=$false)]
+        [switch]$FilterOnly = $false,
 
         [Parameter(Mandatory=$true)]
         [ValidateNotNull()]
@@ -289,37 +292,41 @@ Function Add-NetScanRange
         # Verify the collection
         Test-NetScanValidCollection -Collection $Collection
 
-        # Convert and verify the start and end addresses
-        $rangeStartInt = Convert-IPAddressToBigInteger -IPAddress $RangeStart
-        $rangeEndInt = Convert-IPAddressToBigInteger -IPAddress $RangeEnd
-
-        # Ensure both addresses are the same family type
-        if ($RangeStart.AddressFamily -ne $RangeEnd.AddressFamily)
+        # Enumerate addresses, unless FilterOnly specified
+        if (!$FilterOnly)
         {
-            Write-Error "Begin and end address are different address families"
-        }
+            # Convert and verify the start and end addresses
+            $rangeStartInt = Convert-IPAddressToBigInteger -IPAddress $RangeStart
+            $rangeEndInt = Convert-IPAddressToBigInteger -IPAddress $RangeEnd
 
-        # Make sure the begin address is less than or equal to the end address
-        if ($rangeStartInt.Address.CompareTo($rangeEndInt.Address) -gt 0)
-        {
-            Write-Error "Start address is greater than the end address"
-        }
+            # Ensure both addresses are the same family type
+            if ($RangeStart.AddressFamily -ne $RangeEnd.AddressFamily)
+            {
+                Write-Error "Begin and end address are different address families"
+            }
 
-        # Iterate through the addresses using BigIntegers
-        $current = $rangeStartInt.Address
-        while ($current.CompareTo($rangeEndInt.Address) -le 0)
-        {
-            # Convert index/BigInteger to IPAddress
-            $ipAddress = Convert-BigIntegerToIPAddress -Address $current -Length $rangeStartInt.Length
+            # Make sure the begin address is less than or equal to the end address
+            if ($rangeStartInt.Address.CompareTo($rangeEndInt.Address) -gt 0)
+            {
+                Write-Error "Start address is greater than the end address"
+            }
 
-            # Add the IPAddress to the collection
-            Add-NetScanAddress -Collection $Collection -IPAddress $ipAddress -Properties $Properties -PropertyPrefix $PropertyPrefix | Out-Null
+            # Iterate through the addresses using BigIntegers
+            $current = $rangeStartInt.Address
+            while ($current.CompareTo($rangeEndInt.Address) -le 0)
+            {
+                # Convert index/BigInteger to IPAddress
+                $ipAddress = Convert-BigIntegerToIPAddress -Address $current -Length $rangeStartInt.Length
 
-            $current = [System.Numerics.BigInteger]::Add($current, 1)
+                # Add the IPAddress to the collection
+                Add-NetScanAddress -Collection $Collection -IPAddress $ipAddress -Properties $Properties -PropertyPrefix $PropertyPrefix | Out-Null
+
+                $current = [System.Numerics.BigInteger]::Add($current, 1)
+            }
         }
 
         # Add the range to the collection, if a name has been supplied
-        if ($PSBoundParameters.Keys -contains "Name")
+        if (![string]::IsNullOrEmpty($Name))
         {
             $Collection.Ranges[$Name] = [PSCustomObject]@{
                 Name = $Name
