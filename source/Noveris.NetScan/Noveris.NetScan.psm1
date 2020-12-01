@@ -685,11 +685,11 @@ Function Update-NetScanConnectivityInfo
 
         [Parameter(Mandatory=$false)]
         [ValidateNotNull()]
-        [int]$ConcurrentChecks = 80,
+        [int]$ConcurrentChecks = 300,
 
         [Parameter(Mandatory=$false)]
         [ValidateNotNull()]
-        [int]$LowWatermark = 300,
+        [int]$LowWatermark = 1000,
 
         [Parameter(Mandatory=$false)]
         [switch]$LogProgress = $false
@@ -697,6 +697,8 @@ Function Update-NetScanConnectivityInfo
 
     process
     {
+        $startTime = [DateTime]::Now
+
         # Create runspace environment
         Write-Verbose "Creating runspace pool"
         $pool = [RunSpaceFactory]::CreateRunspacePool(1, $ConcurrentChecks)
@@ -802,6 +804,9 @@ Function Update-NetScanConnectivityInfo
         }
 
         Write-Verbose "Filled $memberAdditions properties across objects"
+
+        $duration = ([DateTime]::Now - $startTime)
+        Write-Verbose ("Duration: " + $duration.ToString())
 
         # Pass collection on in pipeline
         $Collection
