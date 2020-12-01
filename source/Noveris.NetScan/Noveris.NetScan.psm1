@@ -399,7 +399,7 @@ Function Select-NetScanSystems
                 }
 
                 # Iterate through the addresses using BigIntegers
-                $matchSystems = $systems.Keys |
+                $matchSystems = $systems.Keys | Sort-Object |
                     Where-Object { $_.CompareTo($rangeStartInt.Address) -ge 0 -and $_.CompareTo($rangeEndInt.Address) -le 0} |
                     ForEach-Object {
                         [PSCustomObject]($systems[$_])
@@ -411,8 +411,9 @@ Function Select-NetScanSystems
 
             "All" {
                 @($Collection.IPv4Systems, $Collection.IPv6Systems) | ForEach-Object {
-                    $_.Values | ForEach-Object {
-                        [PSCustomObject]$_
+                    $systems = $_
+                    $systems.Keys | Sort-Object | ForEach-Object {
+                        [PSCustomObject]($systems[$_])
                     }
                 }
                 break
@@ -491,7 +492,7 @@ Function Add-NetScanPingCheck
 
                 $status = @{
                     Address = $address
-                    Ping = $false
+                    Ping = ""
                     Error = ""
                 }
 
@@ -505,7 +506,7 @@ Function Add-NetScanPingCheck
                         $reply = $pingRequest.Send($Address)
                         if ($reply.Status -eq "Success")
                         {
-                            $status["Ping"] = $true
+                            $status["Ping"] = "True"
                             break
                         }
 
@@ -684,7 +685,11 @@ Function Update-NetScanConnectivityInfo
 
         [Parameter(Mandatory=$false)]
         [ValidateNotNull()]
-        [int]$ConcurrentChecks = 32,
+        [int]$ConcurrentChecks = 80,
+
+        [Parameter(Mandatory=$false)]
+        [ValidateNotNull()]
+        [int]$LowWatermark = 300,
 
         [Parameter(Mandatory=$false)]
         [switch]$LogProgress = $false
@@ -733,7 +738,7 @@ Function Update-NetScanConnectivityInfo
                 foreach ($key in $systemCollection.Keys)
                 {
                     # Wait for runspace count to reach low water mark before proceeding
-                    $runspaces = (Wait-NetScanCompletedRunspaces -Runspaces $runspaces -LowWatermark 300 -ProcessScript $processScript).Runspaces
+                    $runspaces = (Wait-NetScanCompletedRunspaces -Runspaces $runspaces -LowWatermark $LowWatermark -ProcessScript $processScript).Runspaces
 
                     $system = $systemCollection[$key]
 
