@@ -1,8 +1,8 @@
-# Module manifest for Noveris.NetScan
+# Module manifest for NetScan
 
 @{
     # Script module or binary module file associated with this manifest.
-    RootModule = 'Noveris.NetScan.psm1'
+    RootModule = 'NetScan.psm1'
 
     # Version number of this module.
     ModuleVersion = '__FULLVERSION__'
@@ -14,16 +14,16 @@
     )
 
     # ID used to uniquely identify this module
-    GUID = '99f4ff05-0b4d-4291-bd3e-2cc8eddd1233'
+    GUID = '21748286-a0e4-4b36-843b-40d8d8446a0b'
 
     # Author of this module
-    Author = 'Noveris Pty Ltd'
+    Author = 'Jesse Reichman'
 
     # Company or vendor of this module
-    CompanyName = 'Noveris Pty Ltd'
+    CompanyName = 'ArchMachina'
 
     # Copyright statement for this module
-    Copyright = '(c) 2019 Noveris Pty Ltd. All rights reserved.'
+    Copyright = '(c) 2022 Jesse Reichman. All rights reserved.'
 
     # Description of the functionality provided by this module
     Description = 'Network Scanner'
@@ -48,7 +48,6 @@
 
     # Modules that must be imported into the global environment prior to importing this module
     RequiredModules = @(
-        @{"ModuleName"="Noveris.SvcProc";"RequiredVersion"="0.1.3"}
     )
 
     # Assemblies that must be loaded prior to importing this module
@@ -66,7 +65,7 @@
 
     # Modules to import as nested modules of the module specified in RootModule/ModuleToProcess
     NestedModules = @(
-        'Noveris.NetScan.psm1'
+        'NetScan.psm1'
     )
 
     # Functions to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no functions to export.
@@ -96,7 +95,7 @@
 
     # List of all modules packaged with this module
     #ModuleList = @(
-    #    'Noveris.NetScan.psm1'
+    #    'NetScan.psm1'
     #)
 
     # List of all files packaged with this module
@@ -114,10 +113,10 @@
             )
 
             # A URL to the license for this module.
-            LicenseUri = 'https://github.com/noveris-inf/ps-netscan/blob/main/LICENSE'
+            LicenseUri = 'https://github.com/archmachina/ps-netscan/blob/main/LICENSE'
 
             # A URL to the main website for this project.
-            ProjectUri = 'https://github.com/noveris-inf/ps-netscan/'
+            ProjectUri = 'https://github.com/archmachina/ps-netscan/'
 
             # A URL to an icon representing this module.
             # IconUri = ''

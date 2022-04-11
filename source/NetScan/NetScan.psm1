@@ -1,8 +1,6 @@
 <#
 #>
 
-#Requires -Modules @{"ModuleName"="Noveris.SvcProc";"RequiredVersion"="0.1.3"}
-
 ########
 # Global settings
 $ErrorActionPreference = "Stop"
