@@ -1,3 +1,5 @@
 # ps-netscan
 
-[![latest](https://github.com/archmachina/ps-netscan/workflows/latest/badge.svg)](https://github.com/archmachina/ps-netscan/actions?query=workflow%3Alatest) [![release](https://github.com/archmachina/ps-netscan/workflows/release/badge.svg)](https://github.com/archmachina/ps-netscan/actions?query=workflow%3Arelease)
+[![latest](https://github.com/archmachina/ps-netscan/workflows/latest/badge.svg)](https://github.com/archmachina/ps-netscan/actions?query=workflow%3Alatest)
+[![release](https://github.com/archmachina/ps-netscan/workflows/release/badge.svg)](https://github.com/archmachina/ps-netscan/actions?query=workflow%3Arelease)
+[![linting](https://github.com/archmachina/ps-netscan/workflows/linting/badge.svg)](https://github.com/archmachina/ps-netscan/actions?query=workflow%3Alinting)
